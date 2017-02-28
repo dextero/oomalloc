@@ -1,15 +1,23 @@
+#define _GNU_SOURCE
+
+#include <assert.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdarg.h>
+#include <stdbool.h>
 #include <sys/types.h>
 
 #include "oomalloc.h"
+
+extern char *getenv(const char *name);
 
 typedef void *malloc_t(size_t size);
 typedef void free_t(void *ptr);
 typedef void *calloc_t(size_t nmemb, size_t size);
 typedef void *realloc_t(void *ptr, size_t size);
-typedef size_t malloc_usable_size_t(void *ptr);
+
+size_t malloc_usable_size(void *ptr);
 
 #ifdef OOMALLOC_TEST
 #define malloc oomalloc_malloc
@@ -23,12 +31,10 @@ calloc_t calloc;
 realloc_t realloc;
 free_t free;
 
-static void *glibc;
 static malloc_t *glibc_malloc;
 static calloc_t *glibc_calloc;
 static realloc_t *glibc_realloc;
 static free_t *glibc_free;
-static malloc_usable_size_t *glibc_malloc_usable_size;
 
 static bool limit_memory = false;
 static size_t limit_memory_bytes;
@@ -39,28 +45,122 @@ static size_t successes_until_next_fail;
 
 static bool log_allocations = false;
 
-static long parse_int(const char *str) {
+static inline bool is_digit(char c) {
+    return '0' <= c && c <= '9';
 }
 
-static size_t print_size(int fd, size_t size) {
-    while (size) {
-        write(fd, 
+static inline bool is_lowercase_letter(char c) {
+    return 'a' <= c && c <= 'z';
+}
+
+static inline bool is_uppercase_letter(char c) {
+    return 'A' <= c && c <= 'Z';
+}
+
+static int parse_size(const char *str,
+                      size_t *out_value,
+                      int base) {
+    if (str[0] == '+') {
+        str += 1;
+    }
+
+    if ((base == 16 || base == 0)
+            && str[0] == '0'
+            && (str[1] == 'x' || str[1] == 'X')) {
+        base = 16;
+        str += 2;
+    }
+
+    if (base == 0) {
+        base = 10;
+    }
+
+    *out_value = 0;
+    while (*str) {
+        if (is_digit(*str)) {
+            *out_value = *out_value * base + (*str - '0');
+        } else if (is_lowercase_letter(*str) && *str - 'a' <= base - 10) {
+            *out_value = *out_value * base + *str - 'a' + 10;
+        } else if (is_uppercase_letter(*str) && *str - 'A' <= base - 10) {
+            *out_value = *out_value * base + *str - 'A' + 10;
+        } else {
+            return -1;
+        }
+        ++str;
+    }
+
+    return 0;
+}
+
+static void print_size(int fd, size_t size) {
+    if (!size) {
+        write(fd, "0", 1);
+    } else {
+        char buf[32] = "";
+        char *p = &buf[32];
+        do {
+            *--p = '0' + size % 10;
+            size /= 10;
+        } while (size > 0);
+
+        write(fd, p, buf + sizeof(buf) - p);
     }
 }
 
-static ssize_t print_ssize(int fd, ssize_t ssize) {
+static void print_ssize(int fd, ssize_t ssize) {
     if (ssize < 0) {
         write(fd, "-", 1);
-        print_size((size_t)-ssize);
+        print_size(fd, (size_t)-ssize);
     } else {
-        print_size((size_t)ssize);
+        print_size(fd, (size_t)ssize);
     }
+}
+
+static void fdprintf(int fd, const char *format, ...)
+    __attribute__((format(printf, 2, 3)));
+
+static void fdprintf(int fd, const char *format, ...) {
+    va_list list;
+    va_start(list, format);
+
+    while (*format) {
+        const char *end = format;
+        while (*end && *end != '%') {
+            ++end;
+        }
+
+        if (format != end) {
+            write(fd, format, end - format);
+            format = end;
+        } else {
+            assert(*format == '%');
+
+            ++format;
+            if (*format++ == 'z') {
+                switch (*format++) {
+                case 'd':
+                    print_ssize(fd, va_arg(list, ssize_t));
+                    break;
+                case 'u':
+                    print_size(fd, va_arg(list, size_t));
+                    break;
+                case '\0':
+                    break;
+                default:
+                    write(fd, format - 3, 3);
+                    break;
+                }
+            }
+        }
+    }
+
+    va_end(list);
 }
 
 #define OOMALLOC_LOG(fmt, ...) \
     do { \
         if (log_allocations) { \
-            fprintf(stderr, fmt "\n", ##__VA_ARGS__); \
+            fdprintf(2, fmt "\n", ##__VA_ARGS__); \
         } \
     } while (0)
 
@@ -103,54 +203,37 @@ static int getenv_size(const char *name,
         return -1;
     }
 
-    char *endptr = NULL;
-    errno = 0;
-    *out_size = strtoull(value, &endptr, base);
-
-    if (errno
-            || !endptr
-            || endptr == value
-            || *endptr != '\0') {
-        return -1;
-    } else {
-        return 0;
-    }
+    return parse_size(value, out_size, base);
 }
 
 static void init() {
-    if (glibc) {
+    if (glibc_malloc) {
         return;
     }
 
-    glibc = dlopen("libc.so.6", RTLD_LAZY);
-    if (!glibc) {
-        return;
-    }
-
-    glibc_malloc = (malloc_t*)dlsym(glibc, "malloc");
-    glibc_free = (free_t*)dlsym(glibc, "free");
-    glibc_calloc = (calloc_t*)dlsym(glibc, "calloc");
-    glibc_realloc = (realloc_t*)dlsym(glibc, "realloc");
-    glibc_malloc_usable_size = (malloc_usable_size_t*)dlsym(glibc, "malloc_usable_size");
+    glibc_malloc = (malloc_t*)dlsym(RTLD_NEXT, "malloc");
+    glibc_free = (free_t*)dlsym(RTLD_NEXT, "free");
+    glibc_calloc = (calloc_t*)dlsym(RTLD_NEXT, "calloc");
+    glibc_realloc = (realloc_t*)dlsym(RTLD_NEXT, "realloc");
 
     if (!glibc_malloc
             || !glibc_free
             || !glibc_calloc
-            || !glibc_realloc
-            || !glibc_malloc_usable_size) {
-        dlclose(glibc);
-        glibc = NULL;
+            || !glibc_realloc) {
+        OOMALLOC_LOG("unable to load glibc functions");
         return;
     }
 
-    if (getenv_size("OOMALLOC_LIMIT_MEMORY", &limit_memory_bytes, 0) == 0) {
-        limit_memory = true;
-    }
-    if (getenv_size("OOMALLOC_FAIL_AFTER", &successes_until_next_fail, 10) == 0) {
-        alloc_fail_requested = true;
-    }
     if (getenv("OOMALLOC_LOG") != NULL) {
         log_allocations = true;
+    }
+
+    size_t n;
+    if (getenv_size("OOMALLOC_LIMIT_MEMORY", &n, 0) == 0) {
+        oomalloc_memory_limit(n);
+    }
+    if (getenv_size("OOMALLOC_FAIL_AFTER", &n, 10) == 0) {
+        oomalloc_fail_after(n);
     }
 }
 
@@ -179,7 +262,7 @@ static bool should_fail(size_t extra_memory_requested) {
 }
 
 static void register_allocated_memory(void *ptr) {
-    size_t actual_size = glibc_malloc_usable_size(ptr);
+    size_t actual_size = malloc_usable_size(ptr);
     total_memory_requested += actual_size;
 
     OOMALLOC_LOG("allocated %zu B", actual_size);
@@ -212,13 +295,13 @@ void *calloc(size_t nmemb, size_t size) {
 void *realloc(void *ptr, size_t size) {
     init();
 
-    size_t old_size = glibc_malloc_usable_size(ptr);
+    size_t old_size = malloc_usable_size(ptr);
     if (size >= old_size && should_fail(size - old_size)) {
         return NULL;
     }
 
     ptr = glibc_realloc(ptr, size);
-    size_t actual_size = glibc_malloc_usable_size(ptr);
+    size_t actual_size = malloc_usable_size(ptr);
     total_memory_requested += actual_size - old_size;
 
     OOMALLOC_LOG("reallocated %zu B to %zu B (delta: %zd)",
@@ -230,7 +313,7 @@ void *realloc(void *ptr, size_t size) {
 void free(void *ptr) {
     init();
 
-    size_t actual_size = glibc_malloc_usable_size(ptr);
+    size_t actual_size = malloc_usable_size(ptr);
     total_memory_requested -= actual_size;
     glibc_free(ptr);
 
