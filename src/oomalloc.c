@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/types.h>
 
 #include "oomalloc.h"
 
@@ -11,6 +12,13 @@ typedef void free_t(void *ptr);
 typedef void *calloc_t(size_t nmemb, size_t size);
 typedef void *realloc_t(void *ptr, size_t size);
 typedef size_t malloc_usable_size_t(void *ptr);
+
+#ifdef OOMALLOC_TEST
+#define malloc oomalloc_malloc
+#define calloc oomalloc_calloc
+#define realloc oomalloc_realloc
+#define free oomalloc_free
+#endif
 
 malloc_t malloc;
 calloc_t calloc;
@@ -33,26 +41,42 @@ size_t successes_until_next_fail;
 
 bool log_allocations = false;
 
+#define OOMALLOC_LOG(fmt, ...) \
+    do { \
+        if (log_allocations) { \
+            fprintf(stderr, fmt "\n", ##__VA_ARGS__); \
+        } \
+    } while (0)
+
 void oomalloc_memory_limit(size_t max_bytes) {
     if (max_bytes == OOMALLOC_UNLIMITED) {
         limit_memory = false;
+        OOMALLOC_LOG("memory limit disabled");
     } else {
         limit_memory = true;
         limit_memory_bytes = max_bytes;
+        OOMALLOC_LOG("memory limit set to %zu bytes", max_bytes);
     }
 }
 
 void oomalloc_fail_after(size_t n) {
     if (n == OOMALLOC_DONT_FAIL) {
         alloc_fail_requested = false;
+        OOMALLOC_LOG("allocation failure on demand disabled");
     } else {
         alloc_fail_requested = true;
         successes_until_next_fail = n;
+        OOMALLOC_LOG("allocation failure requested after %zu successes", n);
     }
 }
 
 void oomalloc_set_log_enabled(bool enabled) {
     log_allocations = enabled;
+}
+
+void oomalloc_reset(void) {
+    oomalloc_memory_limit(OOMALLOC_UNLIMITED);
+    oomalloc_fail_after(OOMALLOC_DONT_FAIL);
 }
 
 static int getenv_size(const char *name,
@@ -82,7 +106,7 @@ static void init() {
         return;
     }
 
-    glibc = dlopen("libc.so", RTLD_LAZY);
+    glibc = dlopen("libc.so.6", RTLD_LAZY);
     if (!glibc) {
         return;
     }
@@ -112,13 +136,6 @@ static void init() {
         log_allocations = true;
     }
 }
-
-#define OOMALLOC_LOG(fmt, ...) \
-    do { \
-        if (log_allocations) { \
-            fprintf(stderr, fmt "\n", ##__VA_ARGS__); \
-        } \
-    } while (0)
 
 static bool should_fail(size_t extra_memory_requested) {
     if (limit_memory
