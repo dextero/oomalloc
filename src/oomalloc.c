@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "oomalloc.h"
 
@@ -120,7 +121,8 @@ static void init() {
     if (!glibc_malloc
             || !glibc_free
             || !glibc_calloc
-            || !glibc_realloc) {
+            || !glibc_realloc
+            || !glibc_malloc_usable_size) {
         dlclose(glibc);
         glibc = NULL;
         return;
