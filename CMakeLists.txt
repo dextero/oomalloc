@@ -9,6 +9,7 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
 
 include_directories(include)
 add_library(${PROJECT_NAME} SHARED src/oomalloc.c)
+set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "-nostdlib -Wl,--whole-archive")
 target_link_libraries(${PROJECT_NAME} dl)
 
 install(FILES include/oomalloc.h DESTINATION include)

@@ -1,10 +1,7 @@
 #include <dlfcn.h>
 #include <errno.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <sys/types.h>
 #include <unistd.h>
+#include <sys/types.h>
 
 #include "oomalloc.h"
 
@@ -26,21 +23,39 @@ calloc_t calloc;
 realloc_t realloc;
 free_t free;
 
-void *glibc;
-malloc_t *glibc_malloc;
-calloc_t *glibc_calloc;
-realloc_t *glibc_realloc;
-free_t *glibc_free;
-malloc_usable_size_t *glibc_malloc_usable_size;
+static void *glibc;
+static malloc_t *glibc_malloc;
+static calloc_t *glibc_calloc;
+static realloc_t *glibc_realloc;
+static free_t *glibc_free;
+static malloc_usable_size_t *glibc_malloc_usable_size;
 
-bool limit_memory = false;
-size_t limit_memory_bytes;
-size_t total_memory_requested = 0;
+static bool limit_memory = false;
+static size_t limit_memory_bytes;
+static size_t total_memory_requested = 0;
 
-bool alloc_fail_requested = false;
-size_t successes_until_next_fail;
+static bool alloc_fail_requested = false;
+static size_t successes_until_next_fail;
 
-bool log_allocations = false;
+static bool log_allocations = false;
+
+static long parse_int(const char *str) {
+}
+
+static size_t print_size(int fd, size_t size) {
+    while (size) {
+        write(fd, 
+    }
+}
+
+static ssize_t print_ssize(int fd, ssize_t ssize) {
+    if (ssize < 0) {
+        write(fd, "-", 1);
+        print_size((size_t)-ssize);
+    } else {
+        print_size((size_t)ssize);
+    }
+}
 
 #define OOMALLOC_LOG(fmt, ...) \
     do { \
