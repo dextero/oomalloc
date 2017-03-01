@@ -1,12 +1,102 @@
 #include <gtest/gtest.h>
 
 #include "oomalloc.h"
+#include "../src/utils.h"
+
+TEST(parse_size, leading_plus) {
+    size_t value = 1;
+    ASSERT_EQ(0, parse_size("+100", &value, 0));
+    ASSERT_EQ(value, 100u);
+}
+
+TEST(parse_size, base_zero) {
+    size_t value;
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("0", &value, 0));
+    ASSERT_EQ(value, 0u);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("100", &value, 0));
+    ASSERT_EQ(value, 100u);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("0x100", &value, 0));
+    ASSERT_EQ(value, 0x100u);
+}
+
+TEST(parse_size, base_ten) {
+    size_t value;
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("0", &value, 10));
+    ASSERT_EQ(value, 0u);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("100", &value, 10));
+    ASSERT_EQ(value, 100u);
+
+    ASSERT_EQ(-1, parse_size("a", &value, 10));
+    ASSERT_EQ(-1, parse_size("0x1", &value, 10));
+}
+
+TEST(parse_size, base_hex) {
+    size_t value;
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("5", &value, 16));
+    ASSERT_EQ(value, 5u);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("af", &value, 16));
+    ASSERT_EQ(value, 0xAFu);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("0xfFf", &value, 16));
+    ASSERT_EQ(value, 0xFFFu);
+
+    ASSERT_EQ(-1, parse_size("g", &value, 16));
+}
+
+TEST(parse_size, base_custom) {
+    size_t value;
+    int base = 10 + 'z' - 'a' + 1;
+    size_t z = base - 1;
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("z", &value, base));
+    ASSERT_EQ(value, z);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("Z", &value, base));
+    ASSERT_EQ(value, z);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("zz", &value, base));
+    ASSERT_EQ(value, z * base + z);
+
+    value = 1;
+    ASSERT_EQ(0, parse_size("ZZ", &value, base));
+    ASSERT_EQ(value, z * base + z);
+}
+
+TEST(parse_size, invalid) {
+    size_t value;
+
+    ASSERT_EQ(-1, parse_size(",", &value, 0));
+    ASSERT_EQ(-1, parse_size(" 1", &value, 0));
+    ASSERT_EQ(-1, parse_size("1 ", &value, 0));
+}
 
 #define MALLOC_OVERHEAD_MARGIN 32
 
 class OomallocTest: public ::testing::Test {
 public:
     void SetUp() {
+        oomalloc_reset();
+    }
+
+    void TearDown() {
         oomalloc_reset();
     }
 };
