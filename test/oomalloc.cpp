@@ -88,6 +88,32 @@ TEST(parse_size, invalid) {
     ASSERT_EQ(-1, parse_size("1 ", &value, 0));
 }
 
+TEST(size_to_string, correct) {
+    char buf[32];
+
+    ASSERT_EQ(1, size_to_string(buf, sizeof(buf), 0));
+    ASSERT_STREQ("0", buf);
+
+    ASSERT_EQ(1, size_to_string(buf, sizeof(buf), 9));
+    ASSERT_STREQ("9", buf);
+
+    // 2**64 - 1
+    ASSERT_EQ((ssize_t)(sizeof("18446744073709551615") - 1),
+              size_to_string(buf, sizeof(buf), 18446744073709551615ull));
+    ASSERT_STREQ("18446744073709551615", buf);
+}
+
+TEST(size_to_string, buffer_too_small) {
+    char buf[32];
+
+    ASSERT_EQ(-1, size_to_string(buf, 0, 0));
+    ASSERT_EQ(-1, size_to_string(buf, 1, 0));
+    ASSERT_EQ(-1, size_to_string(buf, 2, 10));
+    ASSERT_EQ(-1, size_to_string(buf,
+                                 sizeof("18446744073709551615") - 1,
+                                 18446744073709551615ull));
+}
+
 #define MALLOC_OVERHEAD_MARGIN 32
 
 class OomallocTest: public ::testing::Test {
