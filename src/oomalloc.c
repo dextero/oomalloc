@@ -1,3 +1,4 @@
+// for RTLD_NEXT
 #define _GNU_SOURCE
 
 #include <assert.h>
@@ -5,13 +6,12 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <sys/types.h>
 
 #include "oomalloc.h"
-#include "utils.h"
-
-extern char *getenv(const char *name);
 
 typedef void *malloc_t(size_t size);
 typedef void free_t(void *ptr);
@@ -32,112 +32,64 @@ calloc_t calloc;
 realloc_t realloc;
 free_t free;
 
-static malloc_t *glibc_malloc;
-static calloc_t *glibc_calloc;
-static realloc_t *glibc_realloc;
-static free_t *glibc_free;
+struct libc_functions {
+    malloc_t *malloc;
+    calloc_t *calloc;
+    realloc_t *realloc;
+    free_t *free;
+};
 
-static bool limit_memory = false;
-static size_t limit_memory_bytes;
-static size_t total_memory_requested = 0;
+static struct oomalloc_globals {
+    struct libc_functions libc;
 
-static bool alloc_fail_requested = false;
-static size_t successes_until_next_fail;
+    bool memory_limited;
+    size_t memory_limit_bytes;
+    size_t memory_used;
 
-static bool log_allocations = false;
+    bool alloc_fail_requested;
+    size_t successes_until_next_fail;
 
-static void print_size(int fd, size_t size) {
-    char buf[32];
-    ssize_t bytes_written = size_to_string(buf, sizeof(buf), size);
-    write(fd, buf, bytes_written);
-}
-
-static void print_ssize(int fd, ssize_t ssize) {
-    char buf[32];
-    ssize_t bytes_written = 0;
-
-    if (ssize < 0) {
-        buf[0] = '-';
-        bytes_written = 1 + size_to_string(&buf[1], sizeof(buf) - 1, (size_t)-ssize);
-    } else {
-        bytes_written = size_to_string(buf, sizeof(buf), (size_t)ssize);
-    }
-
-    write(fd, buf, bytes_written);
-}
-
-static void fdprintf(int fd, const char *format, ...)
-    __attribute__((format(printf, 2, 3)));
-
-static void fdprintf(int fd, const char *format, ...) {
-    va_list list;
-    va_start(list, format);
-
-    while (*format) {
-        const char *end = format;
-        while (*end && *end != '%') {
-            ++end;
-        }
-
-        if (format != end) {
-            write(fd, format, end - format);
-            format = end;
-        } else {
-            assert(*format == '%');
-
-            ++format;
-            if (*format++ == 'z') {
-                switch (*format++) {
-                case 'd':
-                    print_ssize(fd, va_arg(list, ssize_t));
-                    break;
-                case 'u':
-                    print_size(fd, va_arg(list, size_t));
-                    break;
-                case '\0':
-                    break;
-                default:
-                    write(fd, format - 3, 3);
-                    break;
-                }
-            }
-        }
-    }
-
-    va_end(list);
-}
+    bool log_allocations;
+    size_t allocation_idx;
+} globals = {
+    .memory_limited = false,
+    .memory_used = 0,
+    .alloc_fail_requested = false,
+    .log_allocations = false,
+    .allocation_idx = 0,
+};
 
 #define OOMALLOC_LOG(fmt, ...) \
     do { \
-        if (log_allocations) { \
-            fdprintf(2, fmt "\n", ##__VA_ARGS__); \
+        if (globals.log_allocations) { \
+            fprintf(stderr, fmt "\n", ##__VA_ARGS__); \
         } \
     } while (0)
 
 void oomalloc_memory_limit(size_t max_bytes) {
     if (max_bytes == OOMALLOC_UNLIMITED) {
-        limit_memory = false;
+        globals.memory_limited = false;
         OOMALLOC_LOG("memory limit disabled");
     } else {
-        limit_memory = true;
-        limit_memory_bytes = max_bytes;
+        globals.memory_limited = true;
+        globals.memory_limit_bytes = max_bytes;
         OOMALLOC_LOG("memory limit set to %zu bytes", max_bytes);
     }
 }
 
 void oomalloc_fail_after(size_t n) {
     if (n == OOMALLOC_DONT_FAIL) {
-        alloc_fail_requested = false;
+        globals.alloc_fail_requested = false;
         OOMALLOC_LOG("allocation failure on demand disabled");
     } else {
-        alloc_fail_requested = true;
-        successes_until_next_fail = n;
+        globals.alloc_fail_requested = true;
+        globals.successes_until_next_fail = n;
         OOMALLOC_LOG("allocation failure requested after %zu successes", n);
     }
 }
 
 void oomalloc_set_log_enabled(bool enabled) {
-    log_allocations = enabled;
+    globals.log_allocations = enabled;
 }
 
 void oomalloc_reset(void) {
@@ -153,29 +105,41 @@ static int getenv_size(const char *name,
         return -1;
     }
 
-    return parse_size(value, out_size, base);
+    char *endptr = NULL;
+    errno = 0;
+    *out_size = strtoull(value, &endptr, base);
+
+    if (errno
+            || !endptr
+            || endptr == value
+            || *endptr != '\0') {
+        return -1;
+    } else {
+        return 0;
+    }
 }
 
 static void init() {
-    if (glibc_malloc) {
+    if (globals.libc.malloc) {
         return;
     }
 
-    glibc_malloc = (malloc_t*)dlsym(RTLD_NEXT, "malloc");
-    glibc_free = (free_t*)dlsym(RTLD_NEXT, "free");
-    glibc_calloc = (calloc_t*)dlsym(RTLD_NEXT, "calloc");
-    glibc_realloc = (realloc_t*)dlsym(RTLD_NEXT, "realloc");
+    globals.libc.malloc = (malloc_t*)dlsym(RTLD_NEXT, "malloc");
+    globals.libc.free = (free_t*)dlsym(RTLD_NEXT, "free");
+    globals.libc.calloc = (calloc_t*)dlsym(RTLD_NEXT, "calloc");
+    globals.libc.realloc = (realloc_t*)dlsym(RTLD_NEXT, "realloc");
 
-    if (!glibc_malloc
-            || !glibc_free
-            || !glibc_calloc
-            || !glibc_realloc) {
-        OOMALLOC_LOG("unable to load glibc functions");
+    if (!globals.libc.malloc
+            || !globals.libc.free
+            || !globals.libc.calloc
+            || !globals.libc.realloc) {
+        OOMALLOC_LOG("unable to load libc functions");
+        globals.libc = (struct libc_functions){};
         return;
     }
 
     if (getenv("OOMALLOC_LOG") != NULL) {
-        log_allocations = true;
+        oomalloc_set_log_enabled(true);
     }
 
     size_t n;
@@ -187,36 +151,37 @@ static void init() {
     }
 }
 
-static bool should_fail(size_t extra_memory_requested) {
-    if (limit_memory
-            && total_memory_requested + extra_memory_requested > limit_memory_bytes) {
-        OOMALLOC_LOG("memory limit exhausted: %zu used, %zu requested, %zu/%zu total",
-                     total_memory_requested, extra_memory_requested,
-                     total_memory_requested + extra_memory_requested,
-                     limit_memory_bytes);
+static bool should_fail(size_t bytes_requested) {
+    const size_t possible_usage = globals.memory_used + bytes_requested;
+
+    if (globals.memory_limited
+            && possible_usage > globals.memory_limit_bytes) {
+        OOMALLOC_LOG("memory limit exhausted: %zu used, %zu requested, %zu/%zu "
+                     "total", globals.memory_used, bytes_requested,
+                     possible_usage, globals.memory_limit_bytes);
         return true;
     }
 
-    if (alloc_fail_requested) {
-        if (successes_until_next_fail == 0) {
-            alloc_fail_requested = false;
+    if (globals.alloc_fail_requested) {
+        if (globals.successes_until_next_fail == 0) {
+            globals.alloc_fail_requested = false;
             OOMALLOC_LOG("allocation failure on explicit request");
             return true;
         }
 
-        --successes_until_next_fail;
+        --globals.successes_until_next_fail;
     }
 
-    OOMALLOC_LOG("requested %zu B", extra_memory_requested);
     return false;
 }
 
-static void register_allocated_memory(void *ptr) {
+static void register_allocated_memory(void *ptr, size_t bytes_requested) {
     size_t actual_size = malloc_usable_size(ptr);
-    total_memory_requested += actual_size;
+    globals.memory_used += actual_size;
 
-    OOMALLOC_LOG("allocated %zu B (in use: %zu)",
-                 actual_size, total_memory_requested);
+    OOMALLOC_LOG("%zu. allocation: requested %zu B, got %zu B (in use: %zu)",
+                 globals.allocation_idx++, bytes_requested,
+                 actual_size, globals.memory_used);
 }
 
 void *malloc(size_t size) {
@@ -226,8 +191,8 @@ void *malloc(size_t size) {
         return NULL;
     }
 
-    void *ptr = glibc_malloc(size);
-    register_allocated_memory(ptr);
+    void *ptr = globals.libc.malloc(size);
+    register_allocated_memory(ptr, size);
     return ptr;
 }
 
@@ -238,8 +203,8 @@ void *calloc(size_t nmemb, size_t size) {
         return NULL;
     }
 
-    void *ptr = glibc_calloc(nmemb, size);
-    register_allocated_memory(ptr);
+    void *ptr = globals.libc.calloc(nmemb, size);
+    register_allocated_memory(ptr, size);
     return ptr;
 }
 
@@ -251,13 +216,13 @@ void *realloc(void *ptr, size_t size) {
         return NULL;
     }
 
-    ptr = glibc_realloc(ptr, size);
+    ptr = globals.libc.realloc(ptr, size);
     size_t actual_size = malloc_usable_size(ptr);
-    total_memory_requested += actual_size - old_size;
+    globals.memory_used += actual_size - old_size;
 
-    OOMALLOC_LOG("reallocated %zu B to %zu B (delta: %zd, in use: %zu)",
-                 old_size, actual_size, (ssize_t)actual_size - old_size,
-                 total_memory_requested);
+    OOMALLOC_LOG("%zu. reallocation: %zu B to %zu B (delta: %zd, in use: %zu)",
+                 globals.allocation_idx++, old_size, actual_size,
+                 (ssize_t)actual_size - old_size, globals.memory_used);
 
     return ptr;
 }
@@ -266,9 +231,8 @@ void free(void *ptr) {
     init();
 
     size_t actual_size = malloc_usable_size(ptr);
-    total_memory_requested -= actual_size;
-    glibc_free(ptr);
+    globals.memory_used -= actual_size;
+    globals.libc.free(ptr);
 
-    OOMALLOC_LOG("freed %zu B (in use: %zu)",
-                 actual_size, total_memory_requested);
+    OOMALLOC_LOG("free: %zu B (in use: %zu)", actual_size, globals.memory_used);
 }

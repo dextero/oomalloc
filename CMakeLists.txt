@@ -35,13 +35,16 @@ if(WITH_TESTS)
     set(BUILD_GMOCK OFF)
     add_subdirectory(deps/googletest)
 
-    add_definitions(-DOOMALLOC_TEST)
     add_library(${PROJECT_NAME}_test_lib SHARED src/oomalloc.c)
+    set_target_properties(${PROJECT_NAME}_test_lib PROPERTIES
+                          COMPILE_FLAGS "-DOOMALLOC_TEST")
     target_link_libraries(${PROJECT_NAME}_test_lib dl)
 
     include_directories(deps/googletest/googletest/include
                         src)
     add_executable(${PROJECT_NAME}_test test/oomalloc.cpp)
+    set_target_properties(${PROJECT_NAME}_test PROPERTIES
+                          COMPILE_FLAGS "-DOOMALLOC_TEST")
     target_link_libraries(${PROJECT_NAME}_test gtest gtest_main ${PROJECT_NAME}_test_lib)
 
     enable_testing()
