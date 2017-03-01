@@ -9,6 +9,7 @@
 #include <sys/types.h>
 
 #include "oomalloc.h"
+#include "utils.h"
 
 extern char *getenv(const char *name);
 
@@ -45,75 +46,24 @@ static size_t successes_until_next_fail;
 
 static bool log_allocations = false;
 
-static inline bool is_digit(char c) {
-    return '0' <= c && c <= '9';
-}
-
-static inline bool is_lowercase_letter(char c) {
-    return 'a' <= c && c <= 'z';
-}
-
-static inline bool is_uppercase_letter(char c) {
-    return 'A' <= c && c <= 'Z';
-}
-
-static int parse_size(const char *str,
-                      size_t *out_value,
-                      int base) {
-    if (str[0] == '+') {
-        str += 1;
-    }
-
-    if ((base == 16 || base == 0)
-            && str[0] == '0'
-            && (str[1] == 'x' || str[1] == 'X')) {
-        base = 16;
-        str += 2;
-    }
-
-    if (base == 0) {
-        base = 10;
-    }
-
-    *out_value = 0;
-    while (*str) {
-        if (is_digit(*str)) {
-            *out_value = *out_value * base + (*str - '0');
-        } else if (is_lowercase_letter(*str) && *str - 'a' <= base - 10) {
-            *out_value = *out_value * base + *str - 'a' + 10;
-        } else if (is_uppercase_letter(*str) && *str - 'A' <= base - 10) {
-            *out_value = *out_value * base + *str - 'A' + 10;
-        } else {
-            return -1;
-        }
-        ++str;
-    }
-
-    return 0;
-}
-
 static void print_size(int fd, size_t size) {
-    if (!size) {
-        write(fd, "0", 1);
-    } else {
-        char buf[32] = "";
-        char *p = &buf[32];
-        do {
-            *--p = '0' + size % 10;
-            size /= 10;
-        } while (size > 0);
-
-        write(fd, p, buf + sizeof(buf) - p);
-    }
+    char buf[32];
+    ssize_t bytes_written = size_to_string(buf, sizeof(buf), size);
+    write(fd, buf, bytes_written);
 }
 
 static void print_ssize(int fd, ssize_t ssize) {
+    char buf[32];
+    ssize_t bytes_written = 0;
+
     if (ssize < 0) {
-        write(fd, "-", 1);
-        print_size(fd, (size_t)-ssize);
+        buf[0] = '-';
+        bytes_written = 1 + size_to_string(&buf[1], sizeof(buf) - 1, (size_t)-ssize);
     } else {
-        print_size(fd, (size_t)ssize);
+        bytes_written = size_to_string(buf, sizeof(buf), (size_t)ssize);
     }
+
+    write(fd, buf, bytes_written);
 }
 
 static void fdprintf(int fd, const char *format, ...)
