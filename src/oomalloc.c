@@ -215,7 +215,8 @@ static void register_allocated_memory(void *ptr) {
     size_t actual_size = malloc_usable_size(ptr);
     total_memory_requested += actual_size;
 
-    OOMALLOC_LOG("allocated %zu B", actual_size);
+    OOMALLOC_LOG("allocated %zu B (in use: %zu)",
+                 actual_size, total_memory_requested);
 }
 
 void *malloc(size_t size) {
@@ -254,8 +255,9 @@ void *realloc(void *ptr, size_t size) {
     size_t actual_size = malloc_usable_size(ptr);
     total_memory_requested += actual_size - old_size;
 
-    OOMALLOC_LOG("reallocated %zu B to %zu B (delta: %zd)",
-                 old_size, actual_size, (ssize_t)actual_size - old_size);
+    OOMALLOC_LOG("reallocated %zu B to %zu B (delta: %zd, in use: %zu)",
+                 old_size, actual_size, (ssize_t)actual_size - old_size,
+                 total_memory_requested);
 
     return ptr;
 }
@@ -267,5 +269,6 @@ void free(void *ptr) {
     total_memory_requested -= actual_size;
     glibc_free(ptr);
 
-    OOMALLOC_LOG("freed %zu B", actual_size);
+    OOMALLOC_LOG("freed %zu B (in use: %zu)",
+                 actual_size, total_memory_requested);
 }
