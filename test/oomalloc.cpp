@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "oomalloc.h"
-#include "../src/utils.h"
+#include "utils.h"
 
 TEST(parse_size, leading_plus) {
     size_t value = 1;
