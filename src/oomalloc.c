@@ -98,8 +98,7 @@ void oomalloc_reset(void) {
 }
 
 static int getenv_size(const char *name,
-                       size_t *out_size,
-                       int base) {
+                       size_t *out_size) {
     const char *value = getenv(name);
     if (!value) {
         return -1;
@@ -107,7 +106,7 @@ static int getenv_size(const char *name,
 
     char *endptr = NULL;
     errno = 0;
-    *out_size = strtoull(value, &endptr, base);
+    *out_size = strtoull(value, &endptr, 0);
 
     if (errno
             || !endptr
@@ -143,10 +142,10 @@ static void init() {
     }
 
     size_t n;
-    if (getenv_size("OOMALLOC_LIMIT_MEMORY", &n, 0) == 0) {
+    if (getenv_size("OOMALLOC_LIMIT_MEMORY", &n) == 0) {
         oomalloc_memory_limit(n);
     }
-    if (getenv_size("OOMALLOC_FAIL_AFTER", &n, 10) == 0) {
+    if (getenv_size("OOMALLOC_FAIL_AFTER", &n) == 0) {
         oomalloc_fail_after(n);
     }
 }
