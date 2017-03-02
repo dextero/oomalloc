@@ -51,39 +51,39 @@ static struct oomalloc_globals {
 
     bool log_allocations;
     size_t allocation_idx;
-} globals;
+} GLOBALS;
 
 #define OOMALLOC_LOG(fmt, ...) \
     do { \
-        if (globals.log_allocations) { \
+        if (GLOBALS.log_allocations) { \
             fprintf(stderr, fmt "\n", ##__VA_ARGS__); \
         } \
     } while (0)
 
 void oomalloc_heap_limit(size_t max_bytes) {
     if (max_bytes == OOMALLOC_UNLIMITED) {
-        globals.heap_limited = false;
+        GLOBALS.heap_limited = false;
         OOMALLOC_LOG("memory limit disabled");
     } else {
-        globals.heap_limited = true;
-        globals.heap_limit_bytes = max_bytes;
+        GLOBALS.heap_limited = true;
+        GLOBALS.heap_limit_bytes = max_bytes;
         OOMALLOC_LOG("memory limit set to %zu bytes", max_bytes);
     }
 }
 
 void oomalloc_fail_after(size_t n) {
     if (n == OOMALLOC_DONT_FAIL) {
-        globals.alloc_fail_requested = false;
+        GLOBALS.alloc_fail_requested = false;
         OOMALLOC_LOG("allocation failure on demand disabled");
     } else {
-        globals.alloc_fail_requested = true;
-        globals.successes_until_next_fail = n;
+        GLOBALS.alloc_fail_requested = true;
+        GLOBALS.successes_until_next_fail = n;
         OOMALLOC_LOG("allocation failure requested after %zu successes", n);
     }
 }
 
 void oomalloc_set_log_enabled(bool enabled) {
-    globals.log_allocations = enabled;
+    GLOBALS.log_allocations = enabled;
 }
 
 void oomalloc_reset(void) {
@@ -113,21 +113,21 @@ static int getenv_size(const char *name,
 }
 
 static void init() {
-    if (globals.libc.malloc) {
+    if (GLOBALS.libc.malloc) {
         return;
     }
 
-    globals.libc.malloc = (malloc_t*)dlsym(RTLD_NEXT, "malloc");
-    globals.libc.free = (free_t*)dlsym(RTLD_NEXT, "free");
-    globals.libc.calloc = (calloc_t*)dlsym(RTLD_NEXT, "calloc");
-    globals.libc.realloc = (realloc_t*)dlsym(RTLD_NEXT, "realloc");
+    GLOBALS.libc.malloc = (malloc_t*)dlsym(RTLD_NEXT, "malloc");
+    GLOBALS.libc.free = (free_t*)dlsym(RTLD_NEXT, "free");
+    GLOBALS.libc.calloc = (calloc_t*)dlsym(RTLD_NEXT, "calloc");
+    GLOBALS.libc.realloc = (realloc_t*)dlsym(RTLD_NEXT, "realloc");
 
-    if (!globals.libc.malloc
-            || !globals.libc.free
-            || !globals.libc.calloc
-            || !globals.libc.realloc) {
+    if (!GLOBALS.libc.malloc
+            || !GLOBALS.libc.free
+            || !GLOBALS.libc.calloc
+            || !GLOBALS.libc.realloc) {
         OOMALLOC_LOG("unable to load libc functions");
-        globals.libc = (struct libc_functions){};
+        GLOBALS.libc = (struct libc_functions){};
         return;
     }
 
@@ -151,24 +151,24 @@ enum allocation_attempt_result {
 
 static enum allocation_attempt_result
 register_allocation_attempt(size_t bytes_requested) {
-    const size_t possible_usage = globals.heap_used + bytes_requested;
+    const size_t possible_usage = GLOBALS.heap_used + bytes_requested;
 
-    if (globals.heap_limited
-            && possible_usage > globals.heap_limit_bytes) {
+    if (GLOBALS.heap_limited
+            && possible_usage > GLOBALS.heap_limit_bytes) {
         OOMALLOC_LOG("memory limit exhausted: %zu used, %zu requested, %zu/%zu "
-                     "total", globals.heap_used, bytes_requested,
-                     possible_usage, globals.heap_limit_bytes);
+                     "total", GLOBALS.heap_used, bytes_requested,
+                     possible_usage, GLOBALS.heap_limit_bytes);
         return ALLOC_FAIL_REQUESTED;
     }
 
-    if (globals.alloc_fail_requested) {
-        if (globals.successes_until_next_fail == 0) {
-            globals.alloc_fail_requested = false;
+    if (GLOBALS.alloc_fail_requested) {
+        if (GLOBALS.successes_until_next_fail == 0) {
+            GLOBALS.alloc_fail_requested = false;
             OOMALLOC_LOG("allocation failure on explicit request");
             return ALLOC_FAIL_REQUESTED;
         }
 
-        --globals.successes_until_next_fail;
+        --GLOBALS.successes_until_next_fail;
     }
 
     return ALLOC_CONTINUE;
@@ -176,11 +176,11 @@ register_allocation_attempt(size_t bytes_requested) {
 
 static void register_allocated_memory(void *ptr, size_t bytes_requested) {
     size_t actual_size = malloc_usable_size(ptr);
-    globals.heap_used += actual_size;
+    GLOBALS.heap_used += actual_size;
 
     OOMALLOC_LOG("%zu. allocation: requested %zu B, got %zu B (in use: %zu)",
-                 globals.allocation_idx++, bytes_requested,
-                 actual_size, globals.heap_used);
+                 GLOBALS.allocation_idx++, bytes_requested,
+                 actual_size, GLOBALS.heap_used);
 }
 
 void *malloc(size_t size) {
@@ -190,7 +190,7 @@ void *malloc(size_t size) {
         return NULL;
     }
 
-    void *ptr = globals.libc.malloc(size);
+    void *ptr = GLOBALS.libc.malloc(size);
     register_allocated_memory(ptr, size);
     return ptr;
 }
@@ -202,7 +202,7 @@ void *calloc(size_t nmemb, size_t size) {
         return NULL;
     }
 
-    void *ptr = globals.libc.calloc(nmemb, size);
+    void *ptr = GLOBALS.libc.calloc(nmemb, size);
     register_allocated_memory(ptr, size);
     return ptr;
 }
@@ -216,13 +216,13 @@ void *realloc(void *ptr, size_t size) {
         return NULL;
     }
 
-    ptr = globals.libc.realloc(ptr, size);
+    ptr = GLOBALS.libc.realloc(ptr, size);
     size_t actual_size = malloc_usable_size(ptr);
-    globals.heap_used += actual_size - old_size;
+    GLOBALS.heap_used += actual_size - old_size;
 
     OOMALLOC_LOG("%zu. reallocation: %zu B to %zu B (delta: %zd, in use: %zu)",
-                 globals.allocation_idx++, old_size, actual_size,
-                 (ssize_t)actual_size - old_size, globals.heap_used);
+                 GLOBALS.allocation_idx++, old_size, actual_size,
+                 (ssize_t)actual_size - old_size, GLOBALS.heap_used);
 
     return ptr;
 }
@@ -231,8 +231,8 @@ void free(void *ptr) {
     init();
 
     size_t actual_size = malloc_usable_size(ptr);
-    globals.heap_used -= actual_size;
-    globals.libc.free(ptr);
+    GLOBALS.heap_used -= actual_size;
+    GLOBALS.libc.free(ptr);
 
-    OOMALLOC_LOG("free: %zu B (in use: %zu)", actual_size, globals.heap_used);
+    OOMALLOC_LOG("free: %zu B (in use: %zu)", actual_size, GLOBALS.heap_used);
 }
