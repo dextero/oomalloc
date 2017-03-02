@@ -144,7 +144,13 @@ static void init() {
     }
 }
 
-static bool should_fail(size_t bytes_requested) {
+enum allocation_attempt_result {
+    ALLOC_CONTINUE,
+    ALLOC_FAIL_REQUESTED,
+};
+
+static enum allocation_attempt_result
+register_allocation_attempt(size_t bytes_requested) {
     const size_t possible_usage = globals.heap_used + bytes_requested;
 
     if (globals.heap_limited
@@ -152,20 +158,20 @@ static bool should_fail(size_t bytes_requested) {
         OOMALLOC_LOG("memory limit exhausted: %zu used, %zu requested, %zu/%zu "
                      "total", globals.heap_used, bytes_requested,
                      possible_usage, globals.heap_limit_bytes);
-        return true;
+        return ALLOC_FAIL_REQUESTED;
     }
 
     if (globals.alloc_fail_requested) {
         if (globals.successes_until_next_fail == 0) {
             globals.alloc_fail_requested = false;
             OOMALLOC_LOG("allocation failure on explicit request");
-            return true;
+            return ALLOC_FAIL_REQUESTED;
         }
 
         --globals.successes_until_next_fail;
     }
 
-    return false;
+    return ALLOC_CONTINUE;
 }
 
 static void register_allocated_memory(void *ptr, size_t bytes_requested) {
@@ -180,7 +186,7 @@ static void register_allocated_memory(void *ptr, size_t bytes_requested) {
 void *malloc(size_t size) {
     init();
 
-    if (should_fail(size)) {
+    if (register_allocation_attempt(size) == ALLOC_FAIL_REQUESTED) {
         return NULL;
     }
 
@@ -192,7 +198,7 @@ void *malloc(size_t size) {
 void *calloc(size_t nmemb, size_t size) {
     init();
 
-    if (should_fail(nmemb * size)) {
+    if (register_allocation_attempt(nmemb * size) == ALLOC_FAIL_REQUESTED) {
         return NULL;
     }
 
@@ -205,7 +211,8 @@ void *realloc(void *ptr, size_t size) {
     init();
 
     size_t old_size = malloc_usable_size(ptr);
-    if (size >= old_size && should_fail(size - old_size)) {
+    if (size >= old_size
+            && register_allocation_attempt(size - old_size) == ALLOC_FAIL_REQUESTED) {
         return NULL;
     }
 
