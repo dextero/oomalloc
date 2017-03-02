@@ -10,7 +10,7 @@ extern "C" {
 
 #define OOMALLOC_UNLIMITED SIZE_MAX
 
-void oomalloc_memory_limit(size_t max_bytes);
+void oomalloc_heap_limit(size_t max_bytes);
 
 #define OOMALLOC_DONT_FAIL SIZE_MAX
 

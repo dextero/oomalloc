@@ -35,33 +35,33 @@ TEST_F(OomallocTest, default_realloc) {
     oomalloc_free(p);
 }
 
-TEST_F(OomallocTest, memory_limit_zero_malloc) {
-    oomalloc_memory_limit(0);
+TEST_F(OomallocTest, heap_limit_zero_malloc) {
+    oomalloc_heap_limit(0);
     ASSERT_TRUE(NULL == oomalloc_malloc(1));
 }
 
-TEST_F(OomallocTest, memory_limit_zero_calloc) {
-    oomalloc_memory_limit(0);
+TEST_F(OomallocTest, heap_limit_zero_calloc) {
+    oomalloc_heap_limit(0);
     ASSERT_TRUE(NULL == oomalloc_calloc(1, 1));
 }
 
-TEST_F(OomallocTest, memory_limit_zero_realloc_null) {
-    oomalloc_memory_limit(0);
+TEST_F(OomallocTest, heap_limit_zero_realloc_null) {
+    oomalloc_heap_limit(0);
     ASSERT_TRUE(NULL == oomalloc_realloc(NULL, 1));
 }
 
-TEST_F(OomallocTest, memory_limit_zero_realloc_nonnull) {
+TEST_F(OomallocTest, heap_limit_zero_realloc_nonnull) {
     void *p = oomalloc_malloc(1);
     ASSERT_TRUE(NULL != p);
 
-    oomalloc_memory_limit(0);
+    oomalloc_heap_limit(0);
     ASSERT_TRUE(NULL != oomalloc_realloc(p, 1));
 
     oomalloc_free(p);
 }
 
-TEST_F(OomallocTest, memory_limit_nonzero_malloc) {
-    oomalloc_memory_limit(4096 + MALLOC_OVERHEAD_MARGIN);
+TEST_F(OomallocTest, heap_limit_nonzero_malloc) {
+    oomalloc_heap_limit(4096 + MALLOC_OVERHEAD_MARGIN);
 
     void *p;
     void *p2;
@@ -83,8 +83,8 @@ TEST_F(OomallocTest, memory_limit_nonzero_malloc) {
     oomalloc_free(p);
 }
 
-TEST_F(OomallocTest, memory_limit_nonzero_calloc) {
-    oomalloc_memory_limit(4096 + MALLOC_OVERHEAD_MARGIN);
+TEST_F(OomallocTest, heap_limit_nonzero_calloc) {
+    oomalloc_heap_limit(4096 + MALLOC_OVERHEAD_MARGIN);
 
     void *p;
     void *p2;
@@ -106,8 +106,8 @@ TEST_F(OomallocTest, memory_limit_nonzero_calloc) {
     oomalloc_free(p);
 }
 
-TEST_F(OomallocTest, memory_limit_nonzero_realloc) {
-    oomalloc_memory_limit(4096 + MALLOC_OVERHEAD_MARGIN);
+TEST_F(OomallocTest, heap_limit_nonzero_realloc) {
+    oomalloc_heap_limit(4096 + MALLOC_OVERHEAD_MARGIN);
 
     void *p;
 

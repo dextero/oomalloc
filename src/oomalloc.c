@@ -42,22 +42,16 @@ struct libc_functions {
 static struct oomalloc_globals {
     struct libc_functions libc;
 
-    bool memory_limited;
-    size_t memory_limit_bytes;
-    size_t memory_used;
+    bool heap_limited;
+    size_t heap_limit_bytes;
+    size_t heap_used;
 
     bool alloc_fail_requested;
     size_t successes_until_next_fail;
 
     bool log_allocations;
     size_t allocation_idx;
-} globals = {
-    .memory_limited = false,
-    .memory_used = 0,
-    .alloc_fail_requested = false,
-    .log_allocations = false,
-    .allocation_idx = 0,
-};
+} globals;
 
 #define OOMALLOC_LOG(fmt, ...) \
     do { \
@@ -66,13 +60,13 @@ static struct oomalloc_globals {
         } \
     } while (0)
 
-void oomalloc_memory_limit(size_t max_bytes) {
+void oomalloc_heap_limit(size_t max_bytes) {
     if (max_bytes == OOMALLOC_UNLIMITED) {
-        globals.memory_limited = false;
+        globals.heap_limited = false;
         OOMALLOC_LOG("memory limit disabled");
     } else {
-        globals.memory_limited = true;
-        globals.memory_limit_bytes = max_bytes;
+        globals.heap_limited = true;
+        globals.heap_limit_bytes = max_bytes;
         OOMALLOC_LOG("memory limit set to %zu bytes", max_bytes);
     }
 }
@@ -93,7 +87,7 @@ void oomalloc_set_log_enabled(bool enabled) {
 }
 
 void oomalloc_reset(void) {
-    oomalloc_memory_limit(OOMALLOC_UNLIMITED);
+    oomalloc_heap_limit(OOMALLOC_UNLIMITED);
     oomalloc_fail_after(OOMALLOC_DONT_FAIL);
 }
 
@@ -142,8 +136,8 @@ static void init() {
     }
 
     size_t n;
-    if (getenv_size("OOMALLOC_LIMIT_MEMORY", &n) == 0) {
-        oomalloc_memory_limit(n);
+    if (getenv_size("OOMALLOC_LIMIT_HEAP", &n) == 0) {
+        oomalloc_heap_limit(n);
     }
     if (getenv_size("OOMALLOC_FAIL_AFTER", &n) == 0) {
         oomalloc_fail_after(n);
@@ -151,13 +145,13 @@ static void init() {
 }
 
 static bool should_fail(size_t bytes_requested) {
-    const size_t possible_usage = globals.memory_used + bytes_requested;
+    const size_t possible_usage = globals.heap_used + bytes_requested;
 
-    if (globals.memory_limited
-            && possible_usage > globals.memory_limit_bytes) {
+    if (globals.heap_limited
+            && possible_usage > globals.heap_limit_bytes) {
         OOMALLOC_LOG("memory limit exhausted: %zu used, %zu requested, %zu/%zu "
-                     "total", globals.memory_used, bytes_requested,
-                     possible_usage, globals.memory_limit_bytes);
+                     "total", globals.heap_used, bytes_requested,
+                     possible_usage, globals.heap_limit_bytes);
         return true;
     }
 
@@ -176,11 +170,11 @@ static bool should_fail(size_t bytes_requested) {
 
 static void register_allocated_memory(void *ptr, size_t bytes_requested) {
     size_t actual_size = malloc_usable_size(ptr);
-    globals.memory_used += actual_size;
+    globals.heap_used += actual_size;
 
     OOMALLOC_LOG("%zu. allocation: requested %zu B, got %zu B (in use: %zu)",
                  globals.allocation_idx++, bytes_requested,
-                 actual_size, globals.memory_used);
+                 actual_size, globals.heap_used);
 }
 
 void *malloc(size_t size) {
@@ -217,11 +211,11 @@ void *realloc(void *ptr, size_t size) {
 
     ptr = globals.libc.realloc(ptr, size);
     size_t actual_size = malloc_usable_size(ptr);
-    globals.memory_used += actual_size - old_size;
+    globals.heap_used += actual_size - old_size;
 
     OOMALLOC_LOG("%zu. reallocation: %zu B to %zu B (delta: %zd, in use: %zu)",
                  globals.allocation_idx++, old_size, actual_size,
-                 (ssize_t)actual_size - old_size, globals.memory_used);
+                 (ssize_t)actual_size - old_size, globals.heap_used);
 
     return ptr;
 }
@@ -230,8 +224,8 @@ void free(void *ptr) {
     init();
 
     size_t actual_size = malloc_usable_size(ptr);
-    globals.memory_used -= actual_size;
+    globals.heap_used -= actual_size;
     globals.libc.free(ptr);
 
-    OOMALLOC_LOG("free: %zu B (in use: %zu)", actual_size, globals.memory_used);
+    OOMALLOC_LOG("free: %zu B (in use: %zu)", actual_size, globals.heap_used);
 }
