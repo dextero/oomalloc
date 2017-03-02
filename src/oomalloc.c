@@ -27,10 +27,10 @@ size_t malloc_usable_size(void *ptr);
 #define free oomalloc_free
 #endif
 
-malloc_t malloc;
-calloc_t calloc;
-realloc_t realloc;
-free_t free;
+extern malloc_t malloc;
+extern calloc_t calloc;
+extern realloc_t realloc;
+extern free_t free;
 
 struct libc_functions {
     malloc_t *malloc;
