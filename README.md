@@ -16,7 +16,7 @@ cmake . && make
 ## Usage
 
 ```
-# turn on allocation logs
+# enable allocation logs
 OOMALLOC_LOG=1 LD_PRELOAD=liboomalloc.so ./your-application
 
 # make the 11th allocation return NULL
