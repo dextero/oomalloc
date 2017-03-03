@@ -4,33 +4,34 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <errno.h>
-#include <unistd.h>
+#include <malloc.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "oomalloc.h"
 
-typedef void *malloc_t(size_t size);
-typedef void free_t(void *ptr);
-typedef void *calloc_t(size_t nmemb, size_t size);
-typedef void *realloc_t(void *ptr, size_t size);
-
-size_t malloc_usable_size(void *ptr);
-
 #ifdef OOMALLOC_TEST
-#define malloc oomalloc_malloc
-#define calloc oomalloc_calloc
-#define realloc oomalloc_realloc
-#define free oomalloc_free
+# include "oomalloc_test.h"
+#else
+# define oomalloc_malloc  malloc
+# define oomalloc_calloc  calloc
+# define oomalloc_realloc realloc
+# define oomalloc_free    free
 #endif
 
-extern malloc_t malloc;
-extern calloc_t calloc;
-extern realloc_t realloc;
-extern free_t free;
+typedef void *malloc_t(size_t size);
+typedef void *calloc_t(size_t nmemb, size_t size);
+typedef void *realloc_t(void *ptr, size_t size);
+typedef void free_t(void *ptr);
+
+extern malloc_t oomalloc_malloc;
+extern calloc_t oomalloc_calloc;
+extern realloc_t oomalloc_realloc;
+extern free_t oomalloc_free;
 
 struct libc_functions {
     malloc_t *malloc;
@@ -183,7 +184,7 @@ static void register_allocated_memory(void *ptr, size_t bytes_requested) {
                  actual_size, GLOBALS.heap_used);
 }
 
-void *malloc(size_t size) {
+void *oomalloc_malloc(size_t size) {
     init();
 
     if (register_allocation_attempt(size) == ALLOC_FAIL_REQUESTED) {
@@ -195,7 +196,7 @@ void *malloc(size_t size) {
     return ptr;
 }
 
-void *calloc(size_t nmemb, size_t size) {
+void *oomalloc_calloc(size_t nmemb, size_t size) {
     init();
 
     if (register_allocation_attempt(nmemb * size) == ALLOC_FAIL_REQUESTED) {
@@ -207,7 +208,7 @@ void *calloc(size_t nmemb, size_t size) {
     return ptr;
 }
 
-void *realloc(void *ptr, size_t size) {
+void *oomalloc_realloc(void *ptr, size_t size) {
     init();
 
     size_t old_size = malloc_usable_size(ptr);
@@ -227,7 +228,7 @@ void *realloc(void *ptr, size_t size) {
     return ptr;
 }
 
-void free(void *ptr) {
+void oomalloc_free(void *ptr) {
     init();
 
     size_t actual_size = malloc_usable_size(ptr);
