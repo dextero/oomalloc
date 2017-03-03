@@ -39,7 +39,7 @@ struct libc_functions {
     free_t *free;
 };
 
-static struct oomalloc_globals {
+static struct {
     struct libc_functions libc;
 
     bool heap_limited;
