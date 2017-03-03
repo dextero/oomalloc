@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "oomalloc.h"
+#include "oomalloc_test.h"
 
 #define MALLOC_OVERHEAD_MARGIN 32
 
